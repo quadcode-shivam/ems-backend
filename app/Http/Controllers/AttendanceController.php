@@ -3,32 +3,108 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use App\Models\Attendance; // Correctly import the Attendance model
-
-
+use App\Models\Attendance; 
+use Illuminate\Support\Facades\Validator;
+use App\Models\User;
+use App\Models\CheckIn;
 class AttendanceController extends Controller
 {
     
-    public function createAttendance(Request $request)
+    
+    public function checkIn(Request $request)
     {
-        $request->validate([
-            'employee_id' => 'required|exists:employees,id',  // Validate that employee exists
-            'date' => 'required|date',
-            'status' => 'required|in:present,absent,late',
-        ]);
-
-        $attendance = Attendance::create([
-            'employee_id' => $request->employee_id,
-            'date' => $request->date,
+        // Define validation rules for check-in
+        $rules = [
+            'user_id' => 'required|exists:users,user_id', // Validate that user exists in users table
+            'checkin_description' => 'nullable|string', // Optional description
+            'status' => 'nullable|in:present,absent,late', // Optional status
+        ];
+    
+        // Validate request data
+        $validator = Validator::make($request->all(), $rules);
+    
+        // Return validation errors if any
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+    
+        // Find user by user_id
+        $user = User::where('user_id', $request->user_id)->first();
+    
+        if (!$user || $user->status !== 'active' || $user->trash !== 0) {
+            return response()->json([
+                'message' => 'User is inactive or trashed'
+            ], 400);
+        }
+    
+        // Create new check-in record
+        $attendance = CheckIn::create([
+            'employee_id' => $request->user_id,
+            'check_in_time' => now(),
+            'check_in_info' => $request->checkin_description,
             'status' => $request->status,
         ]);
-
+    
         return response()->json([
-            'message' => 'Attendance record created successfully',
+            'message' => 'Check-in record created successfully',
             'data' => $attendance,
         ], 201);
     }
-
+    
+    public function checkOut(Request $request)
+    {
+        // Define validation rules for check-out
+        $rules = [
+            'user_id' => 'required|exists:users,user_id', // Validate that user exists in users table
+            'check_out_time' => 'required|date', // Required check-out time
+            'check_out_description' => 'nullable|string', // Optional description
+        ];
+    
+        // Validate request data
+        $validator = Validator::make($request->all(), $rules);
+    
+        // Return validation errors if any
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+    
+        // Find user by user_id
+        $user = User::where('user_id', $request->user_id)->first();
+    
+        if (!$user || $user->status !== 'active' || $user->trash !== 0) {
+            return response()->json([
+                'message' => 'User is inactive or trashed'
+            ], 400);
+        }
+    
+        // Find existing check-in record
+        $attendance = CheckIn::where('employee_id', $request->user_id)
+            ->whereNull('check_out_time') // Ensure we are updating an open check-in
+            ->first();
+    
+        if (!$attendance) {
+            return response()->json([
+                'message' => 'No active check-in record found'
+            ], 404);
+        }
+    
+        // Update check-out record
+        $attendance->update([
+            'check_out_time' => $request->check_out_time,
+            'check_out_info' => $request->check_out_description,
+        ]);
+    
+        return response()->json([
+            'message' => 'Check-out record updated successfully',
+            'data' => $attendance,
+        ], 200);
+    }
     
 
    public function fetchAttendance(Request $request)
