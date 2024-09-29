@@ -137,32 +137,57 @@ class CheckinController extends Controller
         $request->validate([
             'user_id' => 'nullable|string|exists:users,user_id',  // Validate user_id if provided
         ]);
-
+    
+        $query = CheckIn::where('check_in_time', '>=', now()->subDays(30))
+            ->orderBy('check_in_time', 'desc');
+    
         // Fetch check-ins for a specific user if user_id is provided
         if ($request->has('user_id')) {
-            $checkIns = CheckIn::where('employee_id', $request->user_id)
-                ->orderBy('check_in_time', 'desc')  // Order by latest check-ins first
-                ->take(20)  // Limit to the last 20 records
-                ->get();
-
-            if ($checkIns->isEmpty()) {
-                return response()->json(['message' => 'No check-ins found for this user'], 404);
-            }
-
-            return response()->json([
-                'message' => 'Check-ins retrieved successfully',
-                'check_ins' => $checkIns,
-            ], 200);
+            $query->where('employee_id', $request->user_id);
         }
-
-        // Fetch the last 20 check-ins for all users
-        $checkIns = CheckIn::orderBy('check_in_time', 'desc')  // Latest check-ins first
-            ->take(20)  // Limit to the last 20 records
-            ->get();
-
+    
+        $checkIns = $query->take(20)->get();
+    
+        if ($checkIns->isEmpty()) {
+            return response()->json(['message' => 'No check-ins found for this user in the last 30 days'], 404);
+        }
+    
+        // Variables for calculating averages and finding the last check-out time
+        $totalCheckInSeconds = 0;
+        $totalCheckOutSeconds = 0;
+        $checkInCount = 0;
+        $checkOutCount = 0;
+        $lastCheckOutTime = null;
+    
+        foreach ($checkIns as $checkIn) {
+            // Convert check-in time to seconds
+            $checkInTime = strtotime($checkIn->check_in_time);
+            $totalCheckInSeconds += $checkInTime;
+            $checkInCount++;
+    
+            // If check-out time exists, convert to seconds and store the last check-out time
+            if ($checkIn->check_out_time) {
+                $checkOutTime = strtotime($checkIn->check_out_time);
+                $totalCheckOutSeconds += $checkOutTime;
+                $checkOutCount++;
+    
+                // Update the last check-out time
+                if (!$lastCheckOutTime || $checkOutTime > strtotime($lastCheckOutTime)) {
+                    $lastCheckOutTime = $checkIn->check_out_time;
+                }
+            }
+        }
+    
+        // Calculate the average check-in and check-out times
+        $averageCheckInTime = $checkInCount ? date('H:i:s', $totalCheckInSeconds / $checkInCount) : null;
+        $averageCheckOutTime = $checkOutCount ? date('H:i:s', $totalCheckOutSeconds / $checkOutCount) : null;
+    
         return response()->json([
-            'message' => 'All check-ins retrieved successfully',
+            'message' => 'Check-ins and averages retrieved successfully',
             'check_ins' => $checkIns,
+            'average_check_in_time' => $averageCheckInTime,
+            'average_check_out_time' => $averageCheckOutTime,
+            'last_check_out_time' => $lastCheckOutTime,  // Return the last check-out time
         ], 200);
     }
 }
